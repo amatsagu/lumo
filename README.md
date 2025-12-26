@@ -16,4 +16,4 @@ go get [github.com/yourusername/lumo](https://github.com/yourusername/lumo)
 Check `cmd/demo/main.go`.
 
 > [!NOTE]  
-> Color logs were tested only on Linux. Lumo is expected to be used to smaller, hobby apps that likely only use standard os stdout and something like systemctl or docker to control app logs.
+> Color logs were tested only on Linux. Lumo is expected to be used in smaller, hobby apps that likely only use standard os stdout and something like systemctl or docker to control app logs.
