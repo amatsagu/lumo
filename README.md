@@ -9,7 +9,7 @@ Lumo is a simple logger for Go, designed for hobby projects and small applicatio
 
 ### Installation
 ```bash
-go get [github.com/yourusername/lumo](https://github.com/yourusername/lumo)
+go get github.com/amatsagu/lumo
 ```
 
 ### Usage
