@@ -24,49 +24,63 @@ type logTask struct {
 }
 
 func (l *logger) ensureWorkerStarted() {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-
+	l.mu.RLock()
 	if l.workerActive {
+		l.mu.RUnlock()
+		return
+	}
+	l.mu.RUnlock()
+
+	l.mu.Lock()
+	if l.workerActive {
+		l.mu.Unlock()
 		return
 	}
 
 	l.logQueue = make(chan logTask, queueSize)
-	l.workerActive = true
 	l.wg.Add(1)
+	l.workerActive = true
 	go l.processQueue()
+
+	l.mu.Unlock()
 }
 
 func (l *logger) stopWorker() {
 	l.mu.Lock()
-	defer l.mu.Unlock()
-
 	if l.workerActive {
 		close(l.logQueue)
 		l.workerActive = false
 		l.mu.Unlock()
+
 		l.wg.Wait()
+
 		l.mu.Lock()
 		l.logQueue = nil
 	}
+	l.mu.Unlock()
 }
 
 func (l *logger) enqueue(task logTask) {
 	l.ensureWorkerStarted()
 
-	defer func() { recover() }()
+	l.mu.RLock()
+
+	if !l.workerActive || l.logQueue == nil {
+		l.mu.RUnlock()
+		return
+	}
 
 	select {
 	case l.logQueue <- task:
 	default:
 		l.logQueue <- task
 	}
+
+	l.mu.RUnlock()
 }
 
 func (l *logger) processQueue() {
-	defer l.wg.Done()
-
-	// FIX: Acquire lock to read configuration safely.
+	// Acquire lock to read configuration safely.
 	// This guarantees we see the latest SetOutput() call.
 	l.mu.Lock()
 	currentOutput := l.output
@@ -75,15 +89,13 @@ func (l *logger) processQueue() {
 	writer := bufio.NewWriter(currentOutput)
 	timer := time.NewTimer(workerCooldown)
 
-	defer func() {
-		timer.Stop()
-		writer.Flush()
-	}()
-
 	for {
 		select {
 		case task, ok := <-l.logQueue:
 			if !ok {
+				timer.Stop()
+				writer.Flush()
+				l.wg.Done()
 				return
 			}
 
@@ -98,7 +110,7 @@ func (l *logger) processQueue() {
 			writeLog(writer, task)
 
 			n := len(l.logQueue)
-			for i := 0; i < n; i++ {
+			for range n {
 				writeLog(writer, <-l.logQueue)
 			}
 			writer.Flush()
@@ -113,16 +125,22 @@ func (l *logger) processQueue() {
 			l.workerActive = false
 			l.logQueue = nil
 			l.mu.Unlock()
+
+			timer.Stop()
+			writer.Flush()
+			l.wg.Done()
 			return
 		}
 	}
 }
 
 func writeLog(w *bufio.Writer, task logTask) {
-	ts := task.time.Format("02/01/2006 15:04:05 UTC")
+	l.mu.RLock()
+	timeFormat := l.timeFormat
+	l.mu.RUnlock()
 
 	fmt.Fprintf(w, "%s%s%s %s%-5s%s %s%s:%d%s %s\n",
-		cGray, ts, cReset,
+		cGray, task.time.Format(timeFormat), cReset,
 		task.levelColor, task.label, cReset,
 		cGray, task.file, task.line, cReset,
 		task.msg,

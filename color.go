@@ -1,10 +1,7 @@
 package lumo
 
-import (
-	"github.com/fatih/color"
-)
-
 var (
+	noColor                                                bool
 	cReset, cRed, cGreen, cYellow, cMagenta, cGray, cWhite string
 )
 
@@ -15,7 +12,7 @@ func init() {
 
 // refreshColors sets the raw ANSI strings based on what fatih/color detects.
 func refreshColors() {
-	if color.NoColor {
+	if noColor {
 		cReset, cRed, cGreen, cYellow, cMagenta, cGray, cWhite = "", "", "", "", "", "", ""
 		return
 	}

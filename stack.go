@@ -19,7 +19,6 @@ func printParsedStack(w *bufio.Writer, stack []byte) {
 			continue
 		}
 
-		// Line A: Function Name
 		if i%2 == 1 {
 			// Clean function name "path/to/pkg.Func" -> "pkg.Func"
 			if idx := strings.LastIndexByte(line, '('); idx != -1 {
@@ -33,7 +32,6 @@ func printParsedStack(w *bufio.Writer, stack []byte) {
 			continue
 		}
 
-		// Line B: File + Line
 		if i%2 == 0 {
 			if framesPrinted >= maxFrames {
 				break
@@ -57,15 +55,12 @@ func printParsedStack(w *bufio.Writer, stack []byte) {
 			lineNum := line[colonIdx+1:]
 			fileName := filepath.Base(fullPath)
 
-			// --- FILTERING ---
-
-			// 1. Hide Runtime & Testing internals
+			// Hide Runtime & Testing internals
 			if strings.Contains(fullPath, "runtime/") || strings.Contains(fullPath, "testing/") {
 				continue
 			}
 
-			// 2. Hide Lumo Internals
-			// If the function belongs to "lumo", hide it...
+			// Hide Lumo Internals
 			if strings.HasPrefix(currentFunc, "lumo.") {
 				// ...UNLESS it's coming from a test file!
 				if !strings.HasSuffix(fileName, "_test.go") {
@@ -73,12 +68,14 @@ func printParsedStack(w *bufio.Writer, stack []byte) {
 				}
 			}
 
-			// 3. Remove package prefix for display
+			// Optionally remove package prefix for display
 			// "lumo.TestStackParsing" -> "TestStackParsing"
+			l.mu.RLock()
 			displayFunc := currentFunc
-			if dotIdx := strings.IndexByte(displayFunc, '.'); dotIdx != -1 {
+			if dotIdx := strings.IndexByte(displayFunc, '.'); l.hidePackagePrefix && dotIdx != -1 {
 				displayFunc = displayFunc[dotIdx+1:]
 			}
+			l.mu.RUnlock()
 
 			fmt.Fprintf(w, "%s   at %s%s %s%s:%s%s\n",
 				cGray,

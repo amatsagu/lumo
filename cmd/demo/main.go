@@ -20,6 +20,7 @@ func (p Player) String() string {
 
 func main() {
 	lumo.EnableDebug()
+	lumo.HidePackagePrefix()
 	lumo.Info("Initializing Lumo visual test...")
 	lumo.Debug("Loaded configuration from %s", "/etc/config.yaml")
 
