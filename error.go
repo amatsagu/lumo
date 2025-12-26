@@ -1,11 +1,11 @@
 package lumo
 
 import (
-	"errors"
+	"fmt"
 	"runtime/debug"
 )
 
-// LumoError is a custom error that holds a stack trace and structured context.
+// Custom error wrapper that holds a stack trace and simple, additional context.
 type LumoError struct {
 	err     error
 	stack   []byte
@@ -25,9 +25,9 @@ func (e *LumoError) Include(label string, data any) *LumoError {
 	return e
 }
 
-func WrapString(text string) *LumoError {
+func WrapString(format string, a ...any) *LumoError {
 	return &LumoError{
-		err:   errors.New(text),
+		err:   fmt.Errorf(format, a...),
 		stack: captureStack(),
 	}
 }
@@ -36,9 +36,11 @@ func WrapError(err error) *LumoError {
 	if err == nil {
 		return nil
 	}
+
 	if le, ok := err.(*LumoError); ok {
 		return le
 	}
+
 	return &LumoError{
 		err:   err,
 		stack: captureStack(),
