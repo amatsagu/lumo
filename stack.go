@@ -1,91 +1,149 @@
 package lumo
 
 import (
-	"bufio"
-	"fmt"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
-func printParsedStack(w *bufio.Writer, stack []byte) {
-	lines := strings.Split(string(stack), "\n")
+const (
+	maxStackFrames   = 5
+	stackCacheKeyLen = 16
+	maxCallerCache   = 4096
+	maxStackCache    = 512
+)
 
-	var currentFunc string
-	framesPrinted := 0
-	const maxFrames = 5
+type parsedFrame struct {
+	funcName string
+	fileName string
+	line     int
+}
 
-	for i, line := range lines {
-		if len(line) == 0 {
-			continue
-		}
+type callerLoc struct {
+	file string
+	line int
+}
 
-		if i%2 == 1 {
-			// Clean function name "path/to/pkg.Func" -> "pkg.Func"
-			if idx := strings.LastIndexByte(line, '('); idx != -1 {
-				currentFunc = line[:idx]
-			} else {
-				currentFunc = line
-			}
-			if lastSlash := strings.LastIndexByte(currentFunc, '/'); lastSlash != -1 {
-				currentFunc = currentFunc[lastSlash+1:]
-			}
-			continue
-		}
+type stackCacheKey [stackCacheKeyLen]uintptr
 
-		if i%2 == 0 {
-			if framesPrinted >= maxFrames {
+type stackCacheVal struct {
+	frames [maxStackFrames]parsedFrame
+	count  int
+}
+
+func resolveCallerLoc(pc uintptr, cache map[uintptr]callerLoc) callerLoc {
+	if pc == 0 {
+		return callerLoc{file: "unknown", line: 0}
+	}
+	if loc, ok := cache[pc]; ok {
+		return loc
+	}
+
+	var pcs [1]uintptr
+	pcs[0] = pc
+	frames := runtime.CallersFrames(pcs[:])
+	frame, _ := frames.Next()
+
+	loc := callerLoc{file: "unknown", line: frame.Line}
+	if frame.File != "" {
+		loc.file = filepath.Base(frame.File)
+	}
+
+	if len(cache) >= maxCallerCache {
+		clear(cache)
+	}
+	cache[pc] = loc
+	return loc
+}
+
+func resolveStackFrames(pcs []uintptr, cache map[stackCacheKey]stackCacheVal, out *[maxStackFrames]parsedFrame) int {
+	if len(pcs) == 0 {
+		return 0
+	}
+
+	var key stackCacheKey
+	keyLen := min(len(pcs), stackCacheKeyLen)
+	copy(key[:], pcs[:keyLen])
+
+	if cached, ok := cache[key]; ok && (len(pcs) <= stackCacheKeyLen || cached.count == maxStackFrames) {
+		*out = cached.frames
+		return cached.count
+	}
+
+	count := collectFrames(pcs, out)
+
+	if len(cache) >= maxStackCache {
+		clear(cache)
+	}
+	cache[key] = stackCacheVal{frames: *out, count: count}
+	return count
+}
+
+func collectFrames(pcs []uintptr, out *[maxStackFrames]parsedFrame) int {
+	if len(pcs) == 0 {
+		return 0
+	}
+
+	frames := runtime.CallersFrames(pcs)
+	count := 0
+
+	for count < maxStackFrames {
+		frame, more := frames.Next()
+		fullPath := frame.File
+		if fullPath == "" && frame.Function == "" {
+			if !more {
 				break
 			}
+			continue
+		}
 
-			if !strings.HasPrefix(line, "\t") {
-				continue
+		// Hide Go runtime and testing internals.
+		if strings.Contains(fullPath, "runtime/") || strings.Contains(fullPath, "testing/") {
+			if !more {
+				break
 			}
+			continue
+		}
 
-			line = strings.TrimSpace(line)
-			if idx := strings.LastIndex(line, " +"); idx != -1 {
-				line = line[:idx]
+		// Clean function name "path/to/pkg.Func" -> "pkg.Func".
+		funcName := frame.Function
+		if lastSlash := strings.LastIndexByte(funcName, '/'); lastSlash != -1 {
+			funcName = funcName[lastSlash+1:]
+		}
+
+		fileName := "unknown"
+		if fullPath != "" {
+			fileName = filepath.Base(fullPath)
+		}
+
+		// Hide Lumo internals unless coming from a test file.
+		if strings.HasPrefix(funcName, "lumo.") && !strings.HasSuffix(fileName, "_test.go") {
+			if !more {
+				break
 			}
+			continue
+		}
 
-			colonIdx := strings.LastIndexByte(line, ':')
-			if colonIdx == -1 {
-				continue
-			}
+		out[count] = parsedFrame{
+			funcName: funcName,
+			fileName: fileName,
+			line:     frame.Line,
+		}
+		count++
 
-			fullPath := line[:colonIdx]
-			lineNum := line[colonIdx+1:]
-			fileName := filepath.Base(fullPath)
-
-			// Hide Runtime & Testing internals
-			if strings.Contains(fullPath, "runtime/") || strings.Contains(fullPath, "testing/") {
-				continue
-			}
-
-			// Hide Lumo Internals
-			if strings.HasPrefix(currentFunc, "lumo.") {
-				// ...UNLESS it's coming from a test file!
-				if !strings.HasSuffix(fileName, "_test.go") {
-					continue
-				}
-			}
-
-			// Optionally remove package prefix for display
-			// "lumo.TestStackParsing" -> "TestStackParsing"
-			l.mu.RLock()
-			displayFunc := currentFunc
-			if dotIdx := strings.IndexByte(displayFunc, '.'); l.hidePackagePrefix && dotIdx != -1 {
-				displayFunc = displayFunc[dotIdx+1:]
-			}
-			l.mu.RUnlock()
-
-			fmt.Fprintf(w, "%s   at %s%s %s%s:%s%s\n",
-				cGray,
-				cWhite, displayFunc,
-				cGray,
-				fileName, lineNum,
-				cReset,
-			)
-
-			framesPrinted++
+		if !more {
+			break
 		}
 	}
+
+	return count
+}
+
+func formatFrameFunc(funcName string, hidePkgPrefix bool) string {
+	if hidePkgPrefix {
+		if dotIdx := strings.IndexByte(funcName, '.'); dotIdx != -1 {
+			return funcName[dotIdx+1:]
+		}
+	}
+	return funcName
 }

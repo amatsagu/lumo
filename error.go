@@ -2,13 +2,21 @@ package lumo
 
 import (
 	"fmt"
-	"runtime/debug"
+	"reflect"
+	"runtime"
 )
 
-// Custom error wrapper that holds a stack trace and simple, additional context.
+const maxCaptureDepth = 32
+
+type stackBuffer struct {
+	pcs [maxCaptureDepth]uintptr
+	n   int
+}
+
+// LumoError wraps an error with a captured stack trace and optional key-value context.
 type LumoError struct {
 	err     error
-	stack   []byte
+	stack   []uintptr
 	context []contextItem
 }
 
@@ -17,23 +25,40 @@ type contextItem struct {
 	Value any
 }
 
-func (e *LumoError) Error() string { return e.err.Error() }
-func (e *LumoError) Unwrap() error { return e.err }
+func (e *LumoError) Error() string {
+	if e == nil || e.err == nil {
+		return ""
+	}
+	return e.err.Error()
+}
 
+func (e *LumoError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.err
+}
+
+// Include attaches a labeled value to the error for structured logging.
 func (e *LumoError) Include(label string, data any) *LumoError {
+	if e == nil {
+		return nil
+	}
 	e.context = append(e.context, contextItem{Label: label, Value: data})
 	return e
 }
 
+// WrapString creates a new LumoError from a formatted message and captures the stack trace.
 func WrapString(format string, a ...any) *LumoError {
 	return &LumoError{
 		err:   fmt.Errorf(format, a...),
-		stack: captureStack(),
+		stack: captureStack(3),
 	}
 }
 
+// WrapError wraps an existing error with a stack trace, returning it directly if already a *LumoError.
 func WrapError(err error) *LumoError {
-	if err == nil {
+	if isNilError(err) {
 		return nil
 	}
 
@@ -43,10 +68,32 @@ func WrapError(err error) *LumoError {
 
 	return &LumoError{
 		err:   err,
-		stack: captureStack(),
+		stack: captureStack(3),
 	}
 }
 
-func captureStack() []byte {
-	return debug.Stack()
+func captureStack(skip int) []uintptr {
+	var buf [maxCaptureDepth]uintptr
+	n := runtime.Callers(skip, buf[:])
+	if n == 0 {
+		return nil
+	}
+	pcs := make([]uintptr, n)
+	copy(pcs, buf[:n])
+	return pcs
+}
+
+func isNilError(err error) bool {
+	if err == nil {
+		return true
+	}
+	if le, ok := err.(*LumoError); ok {
+		return le == nil
+	}
+	v := reflect.ValueOf(err)
+	switch v.Kind() {
+	case reflect.Ptr, reflect.Interface, reflect.Slice, reflect.Map, reflect.Func, reflect.Chan:
+		return v.IsNil()
+	}
+	return false
 }

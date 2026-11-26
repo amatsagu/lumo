@@ -1,27 +1,40 @@
 package lumo
 
-var (
-	noColor                                                bool
-	cReset, cRed, cGreen, cYellow, cMagenta, cGray, cWhite string
+const (
+	ansiReset   = "\033[0m"
+	ansiRed     = "\033[31m"
+	ansiGreen   = "\033[32m"
+	ansiYellow  = "\033[33m"
+	ansiMagenta = "\033[35m"
+	ansiGray    = "\033[90m"
+	ansiWhite   = "\033[37m"
 )
 
-// init runs automatically. fatih/color's own init() ensures Windows support is enabled.
-func init() {
-	refreshColors()
+type colorPalette struct {
+	reset, red, green, yellow, magenta, gray, white string
 }
 
-// refreshColors sets the raw ANSI strings based on what fatih/color detects.
-func refreshColors() {
-	if noColor {
-		cReset, cRed, cGreen, cYellow, cMagenta, cGray, cWhite = "", "", "", "", "", "", ""
-		return
-	}
+var ansiPalette = colorPalette{
+	reset:   ansiReset,
+	red:     ansiRed,
+	green:   ansiGreen,
+	yellow:  ansiYellow,
+	magenta: ansiMagenta,
+	gray:    ansiGray,
+	white:   ansiWhite,
+}
 
-	cReset = "\033[0m"
-	cRed = "\033[31m"
-	cGreen = "\033[32m"
-	cYellow = "\033[33m"
-	cMagenta = "\033[35m"
-	cGray = "\033[90m"
-	cWhite = "\033[37m"
+func levelANSIColor(lvl level) string {
+	switch lvl {
+	case levelDebug:
+		return ansiMagenta
+	case levelInfo:
+		return ansiGreen
+	case levelWarn:
+		return ansiYellow
+	case levelError, levelPanic:
+		return ansiRed
+	default:
+		return ""
+	}
 }
